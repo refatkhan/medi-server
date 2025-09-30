@@ -21,6 +21,9 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    app.get("/", (req, res) => {
+      res.send("Server is running!");
+    });
     // JWT Verify Middleware
     const verifyJWT = (req, res, next) => {
       const token = req.headers.authorization?.split(" ")[1];
