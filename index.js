@@ -176,10 +176,56 @@ async function run() {
         res.send(result);
       }
     );
+    // Update Confirmation Status API
+    app.patch("/update-confirmation/:id", async (req, res) => {
+      const { confirmationStatus } = req.body;
+      if (!confirmationStatus) {
+        return res
+          .status(400)
+          .send({ error: "confirmationStatus is required" });
+      }
+
+      try {
+        const result = await campsJoinCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { confirmationStatus: confirmationStatus } }
+        );
+        console.log("Update Confirmation Result:", result); // Debug log
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ error: "Registration not found" });
+        }
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating confirmation status:", error);
+        res.status(500).send({ error: "Failed to update confirmation status" });
+      }
+    });
     app.get("/available-camps/:id", async (req, res) => {
       const result = await campsCollection.findOne({
         _id: new ObjectId(req.params.id),
       });
+      res.send(result);
+    });
+
+    //=======================participant==================
+    // Profile API
+    app.get("/participant-profile", async (req, res) => {
+      const user = await usersCollection.findOne({ email: req.query.email });
+      const registration = await campsJoinCollection.findOne({
+        email: req.query.email,
+      });
+      res.send({
+        name: user?.name,
+        photoURL: user?.photoURL,
+        contact: registration?.emergencyContact || "",
+      });
+    });
+
+    // Participant Dashboard API
+    app.get("/participant-analytics", async (req, res) => {
+      const result = await campsJoinCollection
+        .find({ email: req.query.email })
+        .toArray();
       res.send(result);
     });
     // Connect the client to the server	(optional starting in v4.7)
