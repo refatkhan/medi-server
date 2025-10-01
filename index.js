@@ -28,7 +28,7 @@ async function run() {
     const feedbacksCollection = db.collection("feedback");
     const participantCollection = db.collection("participants"); // Assuming this collection exists
     const SECRET_KEY = process.env.JWT_SECRET;
-   
+
     // JWT Verify Middleware
     const verifyJWT = (req, res, next) => {
       const token = req.headers.authorization?.split(" ")[1];
@@ -80,20 +80,59 @@ async function run() {
       const token = jwt.sign(user, SECRET_KEY, { expiresIn: "7d" });
       res.send({ token });
     });
-//api using with user email
-app.get("/users/role/:email", async (req, res) => {
-    const { email } = req.params;
 
-    try {
+    //==================all USERS API==================
+    // Users info
+    app.post("/users", async (req, res) => {
+      try {
+        const user = req.body;
+        if (!user?.email) {
+          return res.status(400).json({ message: "Email is required" });
+        }
+        const usersCollection = db.collection("users");
+        // Check if user already exists
+        const existingUser = await usersCollection.findOne({
+          email: user.email,
+        });
+        if (existingUser) {
+          return res.status(409).json({ message: "User already exists" });
+        }
+        const result = await usersCollection.insertOne(user);
+        res
+          .status(201)
+          .json({ message: "User added successfully", data: result });
+      } catch (err) {
+        console.error("Add User Error:", err);
+        res
+          .status(500)
+          .json({ message: "Internal Server Error", error: err.message });
+      }
+    });
+    //finding user info api using with user email
+    app.get("/users/role/:email", async (req, res) => {
+      const { email } = req.params;
+      try {
         const user = await usersCollection.findOne({ email });
         if (!user) {
-            return res.status(404).json({ message: "User not found" });
+          return res.status(404).json({ message: "User not found" });
         }
         res.json(user); // send full user details
-    } catch (error) {
+      } catch (error) {
         res.status(500).json({ message: error.message });
-    }
-});
+      }
+    });
+
+    //==============CAMPS & DASHBOARD RELATED=================
+
+    //add camps to dbms
+    app.post("/camps", verifyJWT, verifyOrganizer, async (req, res) => {
+      const campData = { ...req.body, participants: 0 };
+      const result = await campsCollection.insertOne(campData);
+      res.send(result);
+    });
+
+
+    //get the camps 
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     // Send a ping to confirm a successful connection
@@ -101,9 +140,8 @@ app.get("/users/role/:email", async (req, res) => {
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
+  } catch (err) {
+    console.error(err);
   }
 }
 run().catch(console.dir);
