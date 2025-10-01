@@ -150,6 +150,45 @@ async function run() {
         .toArray();
       res.send(result);
     });
+ //  check users join status
+    app.get("/check-join-status", async (req, res) => {
+      const { email, campId } = req.query;
+      try {
+        const existing = await campsJoinCollection.findOne({ email, campId });
+        res.send({ joined: !!existing });
+      } catch (error) {
+        console.error("Error checking join status:", error);
+        res.status(500).send({ joined: false });
+      }
+    });
+    // available api
+    app.get("/available-camps", async (req, res) => {
+      const { search, sort } = req.query;
+
+      const query = search
+        ? {
+            $or: [
+              { campName: { $regex: search, $options: "i" } },
+              { location: { $regex: search, $options: "i" } },
+              { doctorName: { $regex: search, $options: "i" } },
+            ],
+          }
+        : {};
+
+      const sortMap = {
+        "most-registered": { participants: -1 },
+        "lowest-fee": { fees: 1 },
+        "highest-fee": { fees: -1 },
+      };
+
+      const result = await campsCollection
+        .find(query)
+        .sort(sortMap[sort] || { campName: 1 })
+        .toArray();
+
+      res.send(result);
+    });
+
     // Registered Camps API
     app.get("/registered-camps", async (req, res) => {
       const result = await campsJoinCollection
