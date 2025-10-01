@@ -228,6 +228,108 @@ async function run() {
         .toArray();
       res.send(result);
     });
+    app.get("/users/role/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ email });
+      res.send({ role: user?.role || "user" });
+    });
+
+    //update profile users
+    app.patch("/update-profile", async (req, res) => {
+      const { email, name, photoURL, contact } = req.body;
+      try {
+        const updatedProfile = await participantCollection.findOneAndUpdate(
+          { email },
+          { $set: { contact, updatedAt: new Date() } },
+          { new: true, upsert: true }
+        );
+        res.send(updatedProfile.value);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to update profile" });
+      }
+    });
+    ///payments
+    app.get("/user-registered-camps", async (req, res) => {
+      const result = await campsJoinCollection
+        .find({ email: req.query.email })
+        .toArray();
+      res.send(result);
+    });
+    // Payment API
+    app.post("/create-payment-intent", async (req, res) => {
+      const { amount } = req.body;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(amount * 100), // Convert to cents
+        currency: "usd",
+      });
+      res.send({ clientSecret: paymentIntent.client_secret });
+    });
+
+    app.patch("/update-payment-status/:id", async (req, res) => {
+      const { status, transactionId } = req.body;
+      const result = await campsJoinCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { status, transactionId } }
+      );
+      res.send(result);
+    });
+
+    // Payment History API
+    app.get("/payment-history", async (req, res) => {
+      const { email } = req.query;
+      if (!email) {
+        return res.status(400).send({ error: "Email is required" });
+      }
+
+      try {
+        const paymentHistory = await campsJoinCollection
+          .find({
+            email,
+            status: { $regex: /^paid$/i }, // Case-insensitive match for "paid"
+          })
+          .toArray();
+        console.log("Payment History for email", email, ":", paymentHistory); // Debug log
+        if (paymentHistory.length === 0) {
+          return res.status(404).send({ error: "No payment history found" });
+        }
+        res.send(paymentHistory);
+      } catch (error) {
+        console.error("Error fetching payment history:", error);
+        res.status(500).send({ error: "Failed to fetch payment history" });
+      }
+    });
+    app.delete("/cancel-registration/:id", async (req, res) => {
+      const registration = await campsJoinCollection.findOne({
+        _id: new ObjectId(req.params.id),
+      });
+      if (!registration) {
+        return res.status(404).send({ message: "Registration not found" });
+      }
+      if (registration.status === "paid") {
+        return res
+          .status(400)
+          .send({ message: "Cannot cancel paid registration" });
+      }
+      const session = client.startSession();
+      try {
+        await session.withTransaction(async () => {
+          // Delete registration
+          await campsJoinCollection.deleteOne(
+            { _id: new ObjectId(req.params.id) },
+            { session }
+          );
+          // Decrement participant count
+          await campsCollection.updateOne(
+            { _id: new ObjectId(registration.campId) },
+            { $inc: { participants: -1 } },
+            { session }
+          );
+        });
+        res.send({ success: true });
+      } finally {
+        await session.endSession();
+      }
+    });
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     // Send a ping to confirm a successful connection
