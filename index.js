@@ -5,7 +5,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const app = express();
 const port = process.env.PORT || 3000;
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 app.use(cors());
 app.use(express.json());
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.6clk9e4.mongodb.net/mediCamp?retryWrites=true&w=majority&appName=Cluster0`;
@@ -150,7 +150,7 @@ async function run() {
         .toArray();
       res.send(result);
     });
- //  check users join status
+    //  check users join status
     app.get("/check-join-status", async (req, res) => {
       const { email, campId } = req.query;
       try {
@@ -188,7 +188,70 @@ async function run() {
 
       res.send(result);
     });
+    // Camp Registration API
+    app.post("/camps-join", async (req, res) => {
+      const data = req.body;
+      const { email, campId } = data;
+      const session = client.startSession();
 
+      try {
+        await session.withTransaction(async () => {
+          const existing = await campsJoinCollection.findOne(
+            { email, campId },
+            { session }
+          );
+
+          if (existing) {
+            throw new Error("You have already registered for this camp");
+          }
+
+          const registrationData = {
+            ...data,
+            status: "unpaid",
+            confirmationStatus: "Pending",
+            registeredAt: new Date(),
+          };
+
+          const result = await campsJoinCollection.insertOne(registrationData, {
+            session,
+          });
+
+          const updateResult = await campsCollection.updateOne(
+            { _id: new ObjectId(campId) },
+            { $inc: { participants: 1 } },
+            { session }
+          );
+
+          if (updateResult.matchedCount === 0) {
+            throw new Error("Camp not found for participant count update");
+          }
+
+          res.send({
+            success: true,
+            insertedId: result.insertedId,
+            message: "Registration successful",
+          });
+        });
+      } catch (error) {
+        if (
+          error.message.includes("duplicate key") ||
+          error.message.includes("already registered")
+        ) {
+          res.status(400).send({
+            success: false,
+            message: "You have already registered for this camp",
+          });
+        } else {
+          console.error("Registration error:", error);
+          res.status(500).send({
+            success: false,
+            message: error.message || "Registration failed",
+          });
+        }
+      } finally {
+        await session.endSession();
+      }
+    });
     // Registered Camps API
     app.get("/registered-camps", async (req, res) => {
       const result = await campsJoinCollection
@@ -208,8 +271,6 @@ async function run() {
         res.send(result);
       }
     );
-
-    //updated related
     // Update Camp API
     app.patch(
       "/update-camp/:id",
