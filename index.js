@@ -21,9 +21,14 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    app.get("/", (req, res) => {
-      res.send("Server is running!");
-    });
+    const db = client.db("campDB");
+    const campsCollection = db.collection("camps");
+    const campsJoinCollection = db.collection("campsJoin");
+    const usersCollection = db.collection("users");
+    const feedbacksCollection = db.collection("feedback");
+    const participantCollection = db.collection("participants"); // Assuming this collection exists
+    const SECRET_KEY = process.env.JWT_SECRET;
+   
     // JWT Verify Middleware
     const verifyJWT = (req, res, next) => {
       const token = req.headers.authorization?.split(" ")[1];
@@ -75,6 +80,20 @@ async function run() {
       const token = jwt.sign(user, SECRET_KEY, { expiresIn: "7d" });
       res.send({ token });
     });
+//api using with user email
+app.get("/users/role/:email", async (req, res) => {
+    const { email } = req.params;
+
+    try {
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.json(user); // send full user details
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     // Send a ping to confirm a successful connection
