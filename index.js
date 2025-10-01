@@ -123,16 +123,65 @@ async function run() {
     });
 
     //==============CAMPS & DASHBOARD RELATED=================
-
+    // Organizer Dashboard API
+    app.get(
+      "/organizer-camps",
+      verifyJWT,
+      verifyOrganizer,
+      async (req, res) => {
+        const result = await campsCollection
+          .find({ organizerEmail: req.query.email })
+          .toArray();
+        res.send(result);
+      }
+    );
     //add camps to dbms
     app.post("/camps", verifyJWT, verifyOrganizer, async (req, res) => {
       const campData = { ...req.body, participants: 0 };
       const result = await campsCollection.insertOne(campData);
       res.send(result);
     });
+    // Registered Camps API
+    app.get("/registered-camps", async (req, res) => {
+      const result = await campsJoinCollection
+        .find({ organizerEmail: req.query.email })
+        .toArray();
+      res.send(result);
+    });
+    //delete the camps
+    app.delete(
+      "/delete-camp/:id",
+      verifyJWT,
+      verifyOrganizer,
+      async (req, res) => {
+        const result = await campsCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+        res.send(result);
+      }
+    );
 
-
-    //get the camps 
+    //updated related
+    // Update Camp API
+    app.patch(
+      "/update-camp/:id",
+      verifyJWT,
+      verifyOrganizer,
+      async (req, res) => {
+        const { _id, ...updateData } = req.body;
+        const result = await campsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: updateData }
+        );
+        res.send(result);
+      }
+    );
+    app.get("/available-camps/:id", async (req, res) => {
+      const result = await campsCollection.findOne({
+        _id: new ObjectId(req.params.id),
+      });
+      res.send(result);
+    });
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     // Send a ping to confirm a successful connection
