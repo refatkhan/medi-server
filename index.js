@@ -141,6 +141,15 @@ async function run() {
       const result = await campsCollection.insertOne(campData);
       res.send(result);
     });
+    //get camps
+    app.get("/camps", async (req, res) => {
+      const result = await campsCollection
+        .find()
+        .sort({ participants: -1 })
+        .limit(6)
+        .toArray();
+      res.send(result);
+    });
     // Registered Camps API
     app.get("/registered-camps", async (req, res) => {
       const result = await campsJoinCollection
