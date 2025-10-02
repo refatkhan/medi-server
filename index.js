@@ -521,5 +521,8 @@ async function run() {
   } finally {
   }
 }
+run().catch(console.dir);
 
-
+// 🚨 For Vercel: DO NOT use app.listen()
+// Instead, export the app
+module.exports = app;
