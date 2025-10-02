@@ -189,11 +189,11 @@ async function run() {
       res.send(result);
     });
     // Camp Registration API
+    // Camp Registration API
     app.post("/camps-join", async (req, res) => {
       const data = req.body;
       const { email, campId } = data;
       const session = client.startSession();
-
       try {
         await session.withTransaction(async () => {
           const existing = await campsJoinCollection.findOne(
@@ -252,13 +252,31 @@ async function run() {
         await session.endSession();
       }
     });
+
     // Registered Camps API
     app.get("/registered-camps", async (req, res) => {
-      const result = await campsJoinCollection
+      const registered = await campsJoinCollection
         .find({ organizerEmail: req.query.email })
         .toArray();
+
+      // Fetch all camp names from camps collection
+      const campIds = registered.map((r) => r.campId);
+      const camps = await campsCollection
+        .find({ _id: { $in: campIds.map((id) => new ObjectId(id)) } })
+        .toArray();
+
+      // Merge campName into registered records
+      const result = registered.map((record) => {
+        const camp = camps.find((c) => c._id.toString() === record.campId);
+        return {
+          ...record,
+          campName: camp?.campName || "Unknown Camp",
+        };
+      });
+
       res.send(result);
     });
+
     //delete the camps
     app.delete(
       "/delete-camp/:id",
@@ -299,7 +317,6 @@ async function run() {
           { _id: new ObjectId(req.params.id) },
           { $set: { confirmationStatus: confirmationStatus } }
         );
-        console.log("Update Confirmation Result:", result); // Debug log
         if (result.matchedCount === 0) {
           return res.status(404).send({ error: "Registration not found" });
         }
@@ -332,10 +349,27 @@ async function run() {
 
     // Participant Dashboard API
     app.get("/participant-analytics", async (req, res) => {
-      const result = await campsJoinCollection
-        .find({ email: req.query.email })
+      const userEmail = req.query.email;
+      // 1. Get registrations
+      const registrations = await campsJoinCollection
+        .find({ email: userEmail })
         .toArray();
-      res.send(result);
+      // 2. Fetch camp details for each registration
+      const enrichedData = await Promise.all(
+        registrations.map(async (reg) => {
+          const camp = await campsCollection.findOne({
+            _id: new ObjectId(reg.campId),
+          });
+          return {
+            ...reg,
+            campName: camp?.campName || "N/A",
+            fees: camp?.fees || 0,
+            location: camp?.location || "N/A",
+            doctorName: camp?.doctorName || "N/A",
+          };
+        })
+      );
+      res.send(enrichedData);
     });
     app.get("/users/role/:email", async (req, res) => {
       const email = req.params.email;
@@ -359,11 +393,35 @@ async function run() {
     });
     ///payments
     app.get("/user-registered-camps", async (req, res) => {
-      const result = await campsJoinCollection
-        .find({ email: req.query.email })
+      const userEmail = req.query.email;
+
+      // 1. Get user registrations
+      const registrations = await campsJoinCollection
+        .find({ email: userEmail })
         .toArray();
-      res.send(result);
+
+      // 2. Fetch camp details for each registration
+      const enrichedData = await Promise.all(
+        registrations.map(async (reg) => {
+          const camp = await campsCollection.findOne({
+            _id: new ObjectId(reg.campId),
+          });
+          return {
+            _id: reg._id,
+            campId: reg.campId,
+            campName: camp?.campName || "Unknown Camp",
+            fees: camp?.fees || 0,
+            location: camp?.location || "Unknown Location",
+            doctorName: camp?.doctorName || "Unknown Doctor",
+            status: reg.status || "unpaid",
+            confirmationStatus: reg.confirmationStatus || "Pending",
+          };
+        })
+      );
+
+      res.send(enrichedData);
     });
+
     // Payment API
     app.post("/create-payment-intent", async (req, res) => {
       const { amount } = req.body;
@@ -397,13 +455,11 @@ async function run() {
             status: { $regex: /^paid$/i }, // Case-insensitive match for "paid"
           })
           .toArray();
-        console.log("Payment History for email", email, ":", paymentHistory); // Debug log
         if (paymentHistory.length === 0) {
           return res.status(404).send({ error: "No payment history found" });
         }
         res.send(paymentHistory);
       } catch (error) {
-        console.error("Error fetching payment history:", error);
         res.status(500).send({ error: "Failed to fetch payment history" });
       }
     });
@@ -439,19 +495,31 @@ async function run() {
         await session.endSession();
       }
     });
+
+    //feedback
+    // Feedback API
+    app.post("/submit-feedback", async (req, res) => {
+      const feedback = {
+        ...req.body,
+        submittedAt: new Date(),
+      };
+      const result = await feedbacksCollection.insertOne(feedback);
+      res.send(result);
+    });
+
+    app.get("/feedbacks", async (req, res) => {
+      const result = await feedbacksCollection.find().toArray();
+      res.send(result);
+    });
+
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    app.get("/", (req, res) => {
+      res.send("🚑 Medical Camp API is running!");
+    });
+
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
-  } catch (err) {
-    console.error(err);
+  } finally {
   }
 }
-run().catch(console.dir);
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+
