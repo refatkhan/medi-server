@@ -254,57 +254,28 @@ async function run() {
     });
 
     // Registered Camps API
-    app.get(
-      "/registered-camps",
-      verifyJWT,
-      verifyOrganizer,
-      async (req, res) => {
-        try {
-          const organizerEmail = req.query.email;
+    app.get("/registered-camps", async (req, res) => {
+      const registered = await campsJoinCollection
+        .find({ organizerEmail: req.query.email })
+        .toArray();
 
-          // Step 1: Find all camps created by this organizer
-          const organizerCamps = await campsCollection
-            .find({ organizerEmail })
-            .toArray();
-          if (organizerCamps.length === 0) {
-            return res.send([]); // No camps, so no registrations to manage
-          }
+      // Fetch all camp names from camps collection
+      const campIds = registered.map((r) => r.campId);
+      const camps = await campsCollection
+        .find({ _id: { $in: campIds.map((id) => new ObjectId(id)) } })
+        .toArray();
 
-          // Step 2: Get the IDs of these camps, keeping them as ObjectIds
-          const campObjectIds = organizerCamps.map((camp) => camp._id);
+      // Merge campName into registered records
+      const result = registered.map((record) => {
+        const camp = camps.find((c) => c._id.toString() === record.campId);
+        return {
+          ...record,
+          campName: camp?.campName || "Unknown Camp",
+        };
+      });
 
-          // Step 3: Find all registrations that match these camp ObjectIds
-          const registered = await campsJoinCollection
-            .find({
-              // Important: Convert the 'campId' string from the collection to an ObjectId for matching
-              $expr: {
-                $in: [{ $toObjectId: "$campId" }, campObjectIds],
-              },
-            })
-            .toArray();
-
-          // Step 4: Merge camp names into the registration records
-          const result = registered.map((record) => {
-            const camp = organizerCamps.find(
-              (c) => c._id.toString() === record.campId
-            );
-            return {
-              ...record,
-              fees: camp?.fees || 0,
-              campName: camp?.campName || "Unknown Camp",
-            };
-          });
-
-          res.send(result);
-        } catch (error) {
-          console.error(
-            "Error fetching registered camps for organizer:",
-            error
-          );
-          res.status(500).send({ message: "Failed to fetch registrations" });
-        }
-      }
-    );
+      res.send(result);
+    });
 
     //delete the camps
     app.delete(
@@ -410,11 +381,9 @@ async function run() {
     app.patch("/update-profile", verifyJWT, async (req, res) => {
       // Security check: Only allow users to update their own profile
       if (req.decoded.email !== req.body.email) {
-        return res
-          .status(403)
-          .send({
-            message: "Forbidden: You can only update your own profile.",
-          });
+        return res.status(403).send({
+          message: "Forbidden: You can only update your own profile.",
+        });
       }
 
       const { email, name, photoURL, contact } = req.body;
@@ -555,6 +524,28 @@ async function run() {
     });
 
     //feedback
+    app.get("/participant-feedbacks", verifyJWT, async (req, res) => {
+      // Security check: ensure the user is only requesting their own feedback
+      if (req.decoded.email !== req.query.email) {
+        return res
+          .status(403)
+          .send({
+            message: "Forbidden: You can only access your own feedback.",
+          });
+      }
+
+      try {
+        const participantEmail = req.query.email;
+        const result = await feedbacksCollection
+          .find({ participantEmail: participantEmail })
+          .sort({ submittedAt: -1 }) // Show most recent first
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching participant feedback:", error);
+        res.status(500).send({ message: "Failed to fetch feedback" });
+      }
+    });
     // Feedback API
     app.post("/submit-feedback", async (req, res) => {
       const feedback = {
