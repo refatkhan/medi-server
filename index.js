@@ -270,24 +270,27 @@ async function run() {
             return res.send([]); // No camps, so no registrations to manage
           }
 
-          // Step 2: Get the IDs of these camps
-          const campIds = organizerCamps.map((camp) => camp._id.toString());
+          // Step 2: Get the IDs of these camps, keeping them as ObjectIds
+          const campObjectIds = organizerCamps.map((camp) => camp._id);
 
-          // Step 3: Find all registrations that match these camp IDs
+          // Step 3: Find all registrations that match these camp ObjectIds
           const registered = await campsJoinCollection
             .find({
-              campId: { $in: campIds },
+              // Important: Convert the 'campId' string from the collection to an ObjectId for matching
+              $expr: {
+                $in: [{ $toObjectId: "$campId" }, campObjectIds],
+              },
             })
             .toArray();
 
-          // Step 4: Merge camp names into the registration records (your existing logic is good)
+          // Step 4: Merge camp names into the registration records
           const result = registered.map((record) => {
             const camp = organizerCamps.find(
               (c) => c._id.toString() === record.campId
             );
             return {
               ...record,
-              fees: camp?.fees || 0, // Also add fees for display
+              fees: camp?.fees || 0,
               campName: camp?.campName || "Unknown Camp",
             };
           });
@@ -404,42 +407,48 @@ async function run() {
     });
 
     //update profile users
-  app.patch("/update-profile", verifyJWT, async (req, res) => {
-    // Security check: Only allow users to update their own profile
-    if (req.decoded.email !== req.body.email) {
-        return res.status(403).send({ message: "Forbidden: You can only update your own profile." });
-    }
+    app.patch("/update-profile", verifyJWT, async (req, res) => {
+      // Security check: Only allow users to update their own profile
+      if (req.decoded.email !== req.body.email) {
+        return res
+          .status(403)
+          .send({
+            message: "Forbidden: You can only update your own profile.",
+          });
+      }
 
-    const { email, name, photoURL, contact } = req.body;
-    
-    // Construct the fields to be updated in the 'users' collection
-    const updateFields = {
-        updatedAt: new Date() // Always update the timestamp
-    };
-    if (name) updateFields.name = name;
-    if (photoURL) updateFields.photoURL = photoURL;
-    // This will add or update the contact field in the users collection
-    if (contact !== undefined) updateFields.contact = contact; 
+      const { email, name, photoURL, contact } = req.body;
 
-    try {
+      // Construct the fields to be updated in the 'users' collection
+      const updateFields = {
+        updatedAt: new Date(), // Always update the timestamp
+      };
+      if (name) updateFields.name = name;
+      if (photoURL) updateFields.photoURL = photoURL;
+      // This will add or update the contact field in the users collection
+      if (contact !== undefined) updateFields.contact = contact;
+
+      try {
         // --- THE FIX: Use usersCollection instead of participantCollection ---
         const result = await usersCollection.updateOne(
-            { email: email },
-            { $set: updateFields },
-            { upsert: false } // Do not create a new user if one doesn't exist
+          { email: email },
+          { $set: updateFields },
+          { upsert: false } // Do not create a new user if one doesn't exist
         );
 
         if (result.matchedCount === 0) {
-            return res.status(404).send({ error: "User not found" });
+          return res.status(404).send({ error: "User not found" });
         }
 
-        res.send({ success: true, message: "Profile updated successfully in the database" });
-
-    } catch (error) {
+        res.send({
+          success: true,
+          message: "Profile updated successfully in the database",
+        });
+      } catch (error) {
         console.error("Error updating profile in DB:", error);
         res.status(500).send({ error: "Failed to update profile in database" });
-    }
-});
+      }
+    });
     ///payments
     app.get("/user-registered-camps", async (req, res) => {
       const userEmail = req.query.email;
