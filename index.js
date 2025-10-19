@@ -511,7 +511,154 @@ async function run() {
       const result = await feedbacksCollection.find().toArray();
       res.send(result);
     });
+    // ================== ORGANIZER OVERVIEW STATS API ==================
+    app.get(
+      "/organizer-stats",
+      verifyJWT,
+      verifyOrganizer,
+      async (req, res) => {
+        try {
+          // 1. Total Camps, Participants, and Upcoming Camps
+          const campStats = await campsCollection
+            .aggregate([
+              {
+                $group: {
+                  _id: null,
+                  totalCamps: { $sum: 1 },
+                  totalParticipants: { $sum: "$participants" },
+                  upcomingCamps: {
+                    $sum: {
+                      $cond: [
+                        { $gt: ["$dateTime", new Date().toISOString()] },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+            ])
+            .toArray();
 
+          // 2. Total Revenue (from paid registrations)
+          const revenueStats = await campsJoinCollection
+            .aggregate([
+              { $match: { status: "paid" } },
+              // We need to look up the fee from the camps collection
+              {
+                $lookup: {
+                  from: "camps",
+                  // Important: Convert string campId to ObjectId for matching
+                  let: { camp_id: { $toObjectId: "$campId" } },
+                  pipeline: [
+                    { $match: { $expr: { $eq: ["$_id", "$$camp_id"] } } },
+                  ],
+                  as: "campDetails",
+                },
+              },
+              { $unwind: "$campDetails" },
+              {
+                $group: {
+                  _id: null,
+                  totalRevenue: { $sum: "$campDetails.fees" },
+                },
+              },
+            ])
+            .toArray();
+
+          // 3. Registrations over the last 6 months
+          const sixMonthsAgo = new Date();
+          sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+          const registrationsOverTime = await campsJoinCollection
+            .aggregate([
+              { $match: { registeredAt: { $gte: sixMonthsAgo } } },
+              {
+                $group: {
+                  _id: {
+                    year: { $year: "$registeredAt" },
+                    month: { $month: "$registeredAt" },
+                  },
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { "_id.year": 1, "_id.month": 1 } },
+              {
+                $project: {
+                  _id: 0,
+                  month: {
+                    // Convert month number to name (e.g., 1 -> "Jan")
+                    $let: {
+                      vars: {
+                        monthsInYear: [
+                          "",
+                          "Jan",
+                          "Feb",
+                          "Mar",
+                          "Apr",
+                          "May",
+                          "Jun",
+                          "Jul",
+                          "Aug",
+                          "Sep",
+                          "Oct",
+                          "Nov",
+                          "Dec",
+                        ],
+                      },
+                      in: { $arrayElemAt: ["$$monthsInYear", "$_id.month"] },
+                    },
+                  },
+                  count: 1,
+                },
+              },
+            ])
+            .toArray();
+
+          // 4. Camps by Location
+          const campsByLocation = await campsCollection
+            .aggregate([
+              {
+                $group: {
+                  _id: "$location",
+                  count: { $sum: 1 },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  location: "$_id",
+                  count: 1,
+                },
+              },
+            ])
+            .toArray();
+
+          // 5. Recent Registrations
+          const recentRegistrations = await campsJoinCollection
+            .find()
+            .sort({ registeredAt: -1 })
+            .limit(5)
+            .toArray();
+
+          // Consolidate all stats into one response object
+          const stats = {
+            totalCamps: campStats[0]?.totalCamps || 0,
+            totalParticipants: campStats[0]?.totalParticipants || 0,
+            upcomingCampsCount: campStats[0]?.upcomingCamps || 0,
+            totalRevenue: revenueStats[0]?.totalRevenue || 0,
+            registrationsOverTime,
+            campsByLocation,
+            recentRegistrations,
+          };
+
+          res.send(stats);
+        } catch (error) {
+          console.error("Error fetching organizer stats:", error);
+          res.status(500).send({ message: "Failed to fetch stats" });
+        }
+      }
+    );
     // Connect the client to the server	(optional starting in v4.7)
     app.get("/", (req, res) => {
       res.send("🚑 Medical Camp API is running!");
