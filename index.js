@@ -404,7 +404,7 @@ async function run() {
     });
 
     //update profile users
-   app.patch("/update-profile", verifyJWT, async (req, res) => {
+  app.patch("/update-profile", verifyJWT, async (req, res) => {
     // Security check: Only allow users to update their own profile
     if (req.decoded.email !== req.body.email) {
         return res.status(403).send({ message: "Forbidden: You can only update your own profile." });
@@ -418,21 +418,22 @@ async function run() {
     };
     if (name) updateFields.name = name;
     if (photoURL) updateFields.photoURL = photoURL;
-    // This will add or update the contact field
+    // This will add or update the contact field in the users collection
     if (contact !== undefined) updateFields.contact = contact; 
 
     try {
+        // --- THE FIX: Use usersCollection instead of participantCollection ---
         const result = await usersCollection.updateOne(
             { email: email },
             { $set: updateFields },
-            { upsert: false } // We don't want to create a user here, only update
+            { upsert: false } // Do not create a new user if one doesn't exist
         );
 
         if (result.matchedCount === 0) {
             return res.status(404).send({ error: "User not found" });
         }
 
-        res.send({ success: true, message: "Profile updated in database" });
+        res.send({ success: true, message: "Profile updated successfully in the database" });
 
     } catch (error) {
         console.error("Error updating profile in DB:", error);
