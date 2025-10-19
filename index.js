@@ -254,28 +254,54 @@ async function run() {
     });
 
     // Registered Camps API
-    app.get("/registered-camps", async (req, res) => {
-      const registered = await campsJoinCollection
-        .find({ organizerEmail: req.query.email })
-        .toArray();
+    app.get(
+      "/registered-camps",
+      verifyJWT,
+      verifyOrganizer,
+      async (req, res) => {
+        try {
+          const organizerEmail = req.query.email;
 
-      // Fetch all camp names from camps collection
-      const campIds = registered.map((r) => r.campId);
-      const camps = await campsCollection
-        .find({ _id: { $in: campIds.map((id) => new ObjectId(id)) } })
-        .toArray();
+          // Step 1: Find all camps created by this organizer
+          const organizerCamps = await campsCollection
+            .find({ organizerEmail })
+            .toArray();
+          if (organizerCamps.length === 0) {
+            return res.send([]); // No camps, so no registrations to manage
+          }
 
-      // Merge campName into registered records
-      const result = registered.map((record) => {
-        const camp = camps.find((c) => c._id.toString() === record.campId);
-        return {
-          ...record,
-          campName: camp?.campName || "Unknown Camp",
-        };
-      });
+          // Step 2: Get the IDs of these camps
+          const campIds = organizerCamps.map((camp) => camp._id.toString());
 
-      res.send(result);
-    });
+          // Step 3: Find all registrations that match these camp IDs
+          const registered = await campsJoinCollection
+            .find({
+              campId: { $in: campIds },
+            })
+            .toArray();
+
+          // Step 4: Merge camp names into the registration records (your existing logic is good)
+          const result = registered.map((record) => {
+            const camp = organizerCamps.find(
+              (c) => c._id.toString() === record.campId
+            );
+            return {
+              ...record,
+              fees: camp?.fees || 0, // Also add fees for display
+              campName: camp?.campName || "Unknown Camp",
+            };
+          });
+
+          res.send(result);
+        } catch (error) {
+          console.error(
+            "Error fetching registered camps for organizer:",
+            error
+          );
+          res.status(500).send({ message: "Failed to fetch registrations" });
+        }
+      }
+    );
 
     //delete the camps
     app.delete(
@@ -378,19 +404,41 @@ async function run() {
     });
 
     //update profile users
-    app.patch("/update-profile", async (req, res) => {
-      const { email, name, photoURL, contact } = req.body;
-      try {
-        const updatedProfile = await participantCollection.findOneAndUpdate(
-          { email },
-          { $set: { contact, updatedAt: new Date() } },
-          { new: true, upsert: true }
+   app.patch("/update-profile", verifyJWT, async (req, res) => {
+    // Security check: Only allow users to update their own profile
+    if (req.decoded.email !== req.body.email) {
+        return res.status(403).send({ message: "Forbidden: You can only update your own profile." });
+    }
+
+    const { email, name, photoURL, contact } = req.body;
+    
+    // Construct the fields to be updated in the 'users' collection
+    const updateFields = {
+        updatedAt: new Date() // Always update the timestamp
+    };
+    if (name) updateFields.name = name;
+    if (photoURL) updateFields.photoURL = photoURL;
+    // This will add or update the contact field
+    if (contact !== undefined) updateFields.contact = contact; 
+
+    try {
+        const result = await usersCollection.updateOne(
+            { email: email },
+            { $set: updateFields },
+            { upsert: false } // We don't want to create a user here, only update
         );
-        res.send(updatedProfile.value);
-      } catch (error) {
-        res.status(500).send({ error: "Failed to update profile" });
-      }
-    });
+
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ error: "User not found" });
+        }
+
+        res.send({ success: true, message: "Profile updated in database" });
+
+    } catch (error) {
+        console.error("Error updating profile in DB:", error);
+        res.status(500).send({ error: "Failed to update profile in database" });
+    }
+});
     ///payments
     app.get("/user-registered-camps", async (req, res) => {
       const userEmail = req.query.email;
